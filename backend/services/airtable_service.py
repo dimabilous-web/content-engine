@@ -381,7 +381,7 @@ class AirtableService:
 
     def list_runs(self, limit: int = 20) -> list[dict]:
         # Sort descending by triggered_at
-        records = self._runs.all(sort=[{"field": "triggered_at", "direction": "desc"}])
+        records = self._runs.all(sort=["triggered_at"])
         return records[:limit]
 
     def count_completed_runs(self) -> int:
@@ -428,7 +428,7 @@ class AirtableService:
         )
 
         kwargs: dict[str, Any] = {
-            "sort": [{"field": "created_at", "direction": "desc"}],
+            "sort": ["created_at"],
         }
         if formula:
             kwargs["formula"] = formula
