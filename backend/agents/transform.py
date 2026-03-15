@@ -59,16 +59,17 @@ async def transform_node(state: dict[str, Any]) -> dict[str, Any]:
             ideas.append(idea)
         return ideas
 
-    # Process 3 posts concurrently, with a pause between batches
+    # Process all posts concurrently (Claude API handles parallelism well)
+    # Batch of 10 at a time to respect rate limits, with small pause between batches
     all_ideas: list[dict] = []
-    batch_size = 3
+    batch_size = 10
     for i in range(0, len(posts), batch_size):
         batch = posts[i : i + batch_size]
         results = await asyncio.gather(*[_process_one(p) for p in batch])
         for idea_list in results:
             all_ideas.extend(idea_list)
         if i + batch_size < len(posts):
-            await asyncio.sleep(2)
+            await asyncio.sleep(1)
 
     logger.info(f"[{run_id}] transform_node: generated {len(all_ideas)} ideas")
     return {
