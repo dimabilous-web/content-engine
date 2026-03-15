@@ -180,6 +180,26 @@ async def list_runs(
     return [r["fields"] for r in records]
 
 
+@app.get("/stats", tags=["Stats"])
+async def get_stats(svc: AirtableService = Depends(get_airtable)):
+    """Dashboard summary stats."""
+    new_ideas      = svc.get_ideas(status="New",      limit=200)
+    approved_ideas = svc.get_ideas(status="Approved", limit=200)
+    published      = svc.get_ideas(status="Published", limit=200)
+    # fast lane: any New idea with fast_lane flag
+    fast_lane = [r for r in new_ideas if r["fields"].get("fast_lane") or r["fields"].get("fast_lane_flag")]
+    # published this week
+    from datetime import datetime, timezone, timedelta
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    pub_week = [r for r in published if str(r["fields"].get("created_at","")) >= week_ago]
+    return {
+        "ideas_new":       len(new_ideas),
+        "ideas_approved":  len(approved_ideas),
+        "published_week":  len(pub_week),
+        "has_fast_lane":   len(fast_lane) > 0,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Routes — Ideas
 # ---------------------------------------------------------------------------
@@ -192,18 +212,22 @@ async def get_ideas(
     effort:        Optional[str] = Query(default=None),
     limit:         int           = Query(default=50, ge=1, le=200),
     offset:        int           = Query(default=0, ge=0),
+    page:          int           = Query(default=1, ge=1),
     svc: AirtableService = Depends(get_airtable),
 ):
-    """Get ideas with optional filters."""
+    """Get ideas with optional filters. Returns { ideas: [...], total: N }."""
+    # Support both offset and page (page takes priority if > 1)
+    effective_offset = offset if page == 1 else (page - 1) * limit
     records = svc.get_ideas(
         status=status,
         post_type=post_type,
         topic_cluster=topic_cluster,
         effort=effort,
         limit=limit,
-        offset=offset,
+        offset=effective_offset,
     )
-    return [{"id": r["id"], **r["fields"]} for r in records]
+    items = [{"id": r["id"], **r["fields"]} for r in records]
+    return {"ideas": items, "total": len(items)}
 
 
 @app.get("/ideas/{idea_id}", tags=["Ideas"])

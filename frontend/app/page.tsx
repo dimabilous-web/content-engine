@@ -5,14 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Zap, Inbox, CheckCircle, Send } from 'lucide-react';
 import { RunStatus, RecentRunsTable } from '@/components/RunStatus';
-import { getRuns, getIdeas, type Run } from '@/lib/api';
-
-interface Stats {
-  ideas_new: number;
-  ideas_approved: number;
-  published_week: number;
-  has_fast_lane: boolean;
-}
+import { getRuns, getStats, type Run, type Stats } from '@/lib/api';
 
 export default function DashboardPage() {
   const [runs, setRuns] = useState<Run[]>([]);
@@ -21,33 +14,13 @@ export default function DashboardPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [runsData, newIdeas, approvedIdeas, publishedIdeas] = await Promise.allSettled([
+      const [runsData, statsData] = await Promise.allSettled([
         getRuns(),
-        getIdeas({ status: 'New', limit: 1 }),
-        getIdeas({ status: 'Approved', limit: 1 }),
-        getIdeas({ status: 'Published', limit: 100 }),
+        getStats(),
       ]);
 
-      if (runsData.status === 'fulfilled') setRuns(runsData.value.slice(0, 5));
-
-      const newCount = newIdeas.status === 'fulfilled' ? newIdeas.value.total : 0;
-      const approvedCount = approvedIdeas.status === 'fulfilled' ? approvedIdeas.value.total : 0;
-
-      // Count published this week
-      let publishedWeek = 0;
-      let hasFastLane = false;
-      if (publishedIdeas.status === 'fulfilled') {
-        const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-        publishedWeek = publishedIdeas.value.ideas.filter(
-          (i) => new Date(i.created_at).getTime() > weekAgo
-        ).length;
-      }
-
-      // Check for fast lane in new ideas
-      const newFull = await getIdeas({ status: 'New', limit: 50 }).catch(() => ({ ideas: [], total: 0 }));
-      hasFastLane = newFull.ideas.some((i) => i.fast_lane);
-
-      setStats({ ideas_new: newCount, ideas_approved: approvedCount, published_week: publishedWeek, has_fast_lane: hasFastLane });
+      if (runsData.status === 'fulfilled') setRuns(runsData.value.slice(0, 10));
+      if (statsData.status === 'fulfilled') setStats(statsData.value);
     } catch {
       // gracefully handle API down
     } finally {
