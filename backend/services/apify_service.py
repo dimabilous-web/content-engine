@@ -27,7 +27,8 @@ APIFY_API_KEY = os.environ["APIFY_API_KEY"]
 APIFY_BASE    = "https://api.apify.com/v2"
 
 # supreme_coder/linkedin-post — verified working, PAY_PER_EVENT $1/1k
-ACTOR_ID = "supreme_coder~linkedin-post"
+KEYWORD_ACTOR  = "supreme_coder~linkedin-post"       # keyword/viral search — $1/1k, returns numLikes as int
+PROFILE_ACTOR  = "pratikdani~discover-linkedin-people-posts"  # profile posts — clean reactions/comments ints
 
 # Monitored profiles (secondary signal)
 MONITORED_PROFILES: list[dict[str, str]] = [
@@ -90,21 +91,60 @@ def _build_profile_url(handle: str) -> str:
 
 def _normalise(item: dict, source_type: str = "keyword") -> dict:
     """
-    Normalise supreme_coder~linkedin-post output.
+    Normalise output from either actor:
 
-    Key fields from this actor:
-      text, url, numLikes (str), numComments (str),
-      postedAtISO, authorName, authorProfileUrl,
-      authorHeadline, authorProfileId
+    supreme_coder~linkedin-post (keyword):
+      text, url, numLikes (str/int), numComments (str/int),
+      postedAtISO, authorName, authorProfileUrl
+
+    pratikdani~discover-linkedin-people-posts (profiles):
+      text/content, share_url/url, reactions (int), comments (int),
+      created_at, author.name/firstName+lastName, author.url
     """
+    # Author name — handle both flat and nested
+    author = item.get("author") or {}
+    author_name = (
+        item.get("authorName")
+        or author.get("name")
+        or f"{author.get('firstName','')} {author.get('lastName','')}".strip()
+        or "Unknown"
+    )
+    author_url = (
+        item.get("authorProfileUrl")
+        or author.get("url") or author.get("profile_url") or author.get("linkedin_url")
+        or ""
+    )
+    post_url = item.get("url") or item.get("share_url") or item.get("postUrl") or ""
+    post_text = item.get("text") or item.get("content") or item.get("postText") or ""
+
+    # Reactions — pratikdani returns clean ints; supreme_coder returns str
+    reactions = _int(
+        item.get("reactions") or item.get("likes")
+        or item.get("numLikes") or item.get("numReactions") or 0
+    )
+    comments = _int(
+        item.get("comments") or item.get("numComments") or 0
+    )
+    # comments may be a list of objects (supreme_coder) — count them
+    if isinstance(item.get("comments"), list):
+        comments = len(item["comments"])
+
+    posted_at = (
+        item.get("postedAtISO") or item.get("created_at")
+        or item.get("posted_at") or item.get("timestamp") or ""
+    )
+    # posted_at may be a dict with 'date' key
+    if isinstance(posted_at, dict):
+        posted_at = posted_at.get("date") or posted_at.get("timestamp") or ""
+
     return {
-        "author_name":  item.get("authorName") or "Unknown",
-        "author_url":   item.get("authorProfileUrl") or "",
-        "post_url":     item.get("url") or "",
-        "post_text":    item.get("text") or "",
-        "reactions":    _int(item.get("numLikes") or item.get("numReactions") or 0),
-        "comments":     _int(item.get("numComments") or 0),
-        "posted_at":    item.get("postedAtISO") or item.get("postedAt") or "",
+        "author_name":  author_name,
+        "author_url":   author_url,
+        "post_url":     post_url,
+        "post_text":    post_text,
+        "reactions":    reactions,
+        "comments":     comments,
+        "posted_at":    str(posted_at),
         "source_type":  source_type,
     }
 
@@ -124,16 +164,14 @@ def _passes_engagement_filter(post: dict, source_type: str = "keyword") -> bool:
 # ---------------------------------------------------------------------------
 
 async def _run_actor(
-    urls: list[str],
-    max_results: int = 30,
+    actor_id: str,
+    input_data: dict,
     timeout_secs: int = 180,
     memory_mb: int = 512,
 ) -> tuple[list[dict], float]:
     """
-    Run supreme_coder~linkedin-post with a list of URLs.
-    Returns (items, compute_units).
+    Run any Apify actor with given input. Returns (items, compute_units).
     """
-    input_data = {"urls": urls, "maxResults": max_results}
     params = {
         "token":   APIFY_API_KEY,
         "memory":  memory_mb,
@@ -143,7 +181,7 @@ async def _run_actor(
     async with httpx.AsyncClient(timeout=timeout_secs + 60) as client:
         # Start run
         resp = await client.post(
-            f"{APIFY_BASE}/acts/{ACTOR_ID}/runs",
+            f"{APIFY_BASE}/acts/{actor_id}/runs",
             params=params,
             json=input_data,
         )
@@ -152,7 +190,7 @@ async def _run_actor(
             return [], 0.0
 
         run_id = resp.json()["data"]["id"]
-        logger.info(f"Apify run started: {run_id} | urls={len(urls)} | maxResults={max_results}")
+        logger.info(f"Apify run started: {run_id} ({actor_id})")
 
         # Poll
         poll_url   = f"{APIFY_BASE}/acts/{ACTOR_ID}/runs/{run_id}"
@@ -221,8 +259,8 @@ async def scrape_keywords(
 
     try:
         items, cu = await _run_actor(
-            urls=urls,
-            max_results=min(cap, per_query * len(queries)),
+            actor_id=KEYWORD_ACTOR,
+            input_data={"urls": urls, "maxResults": min(cap, per_query * len(queries))},
             timeout_secs=180,
             memory_mb=512,
         )
@@ -265,13 +303,28 @@ async def scrape_profiles(
     profiles = profiles or MONITORED_PROFILES
     urls = [_build_profile_url(p["handle"]) for p in profiles]
 
+    # pratikdani actor: one URL at a time, run concurrently
+    async def _scrape_one_profile(handle: str) -> tuple[list[dict], float]:
+        url = _build_profile_url(handle)
+        try:
+            items, cu = await _run_actor(
+                actor_id=PROFILE_ACTOR,
+                input_data={"url": url, "maxPosts": max_posts_per_profile},
+                timeout_secs=120,
+                memory_mb=256,
+            )
+            return items, cu
+        except Exception as e:
+            logger.error(f"Profile scrape error for {handle}: {e}")
+            return [], 0.0
+
     try:
-        items, cu = await _run_actor(
-            urls=urls,
-            max_results=max_posts_per_profile * len(profiles),
-            timeout_secs=180,
-            memory_mb=512,
-        )
+        results = await asyncio.gather(*[_scrape_one_profile(p["handle"]) for p in profiles])
+        items = []
+        cu = 0.0
+        for batch_items, batch_cu in results:
+            items.extend(batch_items)
+            cu += batch_cu
     except Exception as e:
         logger.error(f"Profile scrape error: {e}")
         return [], 0.0
