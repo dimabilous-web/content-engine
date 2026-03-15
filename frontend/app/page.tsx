@@ -9,7 +9,7 @@ import { getRuns, getStats, type Run, type Stats } from '@/lib/api';
 
 export default function DashboardPage() {
   const [runs, setRuns] = useState<Run[]>([]);
-  const [stats, setStats] = useState<Stats>({ ideas_new: 0, ideas_approved: 0, published_week: 0, has_fast_lane: false });
+  const [stats, setStats] = useState<Stats>({ ideas_new: 0, ideas_approved: 0, published_this_week: 0, has_fast_lane: false });
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
@@ -87,7 +87,7 @@ export default function DashboardPage() {
                 <Send className="w-4 h-4 text-purple-400" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{loading ? '—' : stats.published_week}</p>
+                <p className="text-2xl font-bold">{loading ? '—' : stats.published_this_week}</p>
                 <p className="text-xs text-muted-foreground">Published this week</p>
               </div>
             </div>

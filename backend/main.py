@@ -193,10 +193,10 @@ async def get_stats(svc: AirtableService = Depends(get_airtable)):
     week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
     pub_week = [r for r in published if str(r["fields"].get("created_at","")) >= week_ago]
     return {
-        "ideas_new":       len(new_ideas),
-        "ideas_approved":  len(approved_ideas),
-        "published_week":  len(pub_week),
-        "has_fast_lane":   len(fast_lane) > 0,
+        "ideas_new":            len(new_ideas),
+        "ideas_approved":       len(approved_ideas),
+        "published_this_week":  len(pub_week),
+        "has_fast_lane":        len(fast_lane) > 0,
     }
 
 
