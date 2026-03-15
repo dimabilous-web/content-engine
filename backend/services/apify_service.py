@@ -193,7 +193,7 @@ async def _run_actor(
         logger.info(f"Apify run started: {run_id} ({actor_id})")
 
         # Poll
-        poll_url   = f"{APIFY_BASE}/acts/{ACTOR_ID}/runs/{run_id}"
+        poll_url   = f"{APIFY_BASE}/acts/{actor_id}/runs/{run_id}"
         deadline   = time.monotonic() + timeout_secs
         poll_delay = 5.0
 
